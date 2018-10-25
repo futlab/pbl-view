@@ -2,9 +2,43 @@
 #include "ui_mainwindow.h"
 #include <QSerialPortInfo>
 
+
+Series::Series(QChart *chart, QAbstractAxis *axisX, const QString &name, const QString &units, int maxCount) :
+    maxCount(maxCount)
+{
+    series.setName(name);
+    chart->addSeries(&series);
+    chart->addAxis(&axis, Qt::AlignLeft);
+    axis.setLinePenColor(series.pen().color());
+    axis.setTitleText(units);
+    series.attachAxis(axisX);
+    series.attachAxis(&axis);
+}
+
+void Series::clear()
+{
+    series.clear();
+    minY = NAN;
+    maxY = NAN;
+}
+
+void Series::append(qreal x, qreal y)
+{
+    if (isnan(minY) || y < minY)
+        minY = y;
+    if (isnan(maxY) || y > maxY)
+        maxY = y;
+    axis.setRange(minY - 1, maxY + 1);
+    if (series.count() > maxCount)
+        series.removePoints(0, 1);
+    series.append(x, y);
+    series.show();
+
+}
+
 MainWindow::MainWindow(QWidget *parent) :
     QMainWindow(parent),
-    minX(NAN), maxX(NAN), minForce(NAN), maxForce(NAN), minVoltage(NAN), maxVoltage(NAN),
+    minX(NAN), maxX(NAN),
     ui(new Ui::MainWindow)
 {
     ui->setupUi(this);
@@ -18,26 +52,11 @@ MainWindow::MainWindow(QWidget *parent) :
     axisX = new QValueAxis();
     chart->addAxis(axisX, Qt::AlignBottom);
 
-    forceSeries = new QLineSeries();
-    chart->addSeries(forceSeries);
-    axisForce = new QValueAxis();
-    chart->addAxis(axisForce, Qt::AlignLeft);
-    axisForce->setLinePenColor(forceSeries->pen().color());
-    axisForce->setTitleText("g");
-    forceSeries->attachAxis(axisX);
-    forceSeries->attachAxis(axisForce);
+    series.emplace(std::piecewise_construct, std::forward_as_tuple("f"), std::forward_as_tuple(chart, axisX, "Force", "g"));
+    series.emplace(std::piecewise_construct, std::forward_as_tuple("v"), std::forward_as_tuple(chart, axisX, "Voltage", "V"));
+    series.emplace(std::piecewise_construct, std::forward_as_tuple("i"), std::forward_as_tuple(chart, axisX, "Current", "A"));
+    series.emplace(std::piecewise_construct, std::forward_as_tuple("out"), std::forward_as_tuple(chart, axisX, "Command", "μs"));
 
-    voltageSeries = new QLineSeries();
-    chart->addSeries(voltageSeries);
-    axisVoltage = new QValueAxis();
-    chart->addAxis(axisVoltage, Qt::AlignLeft);
-    axisVoltage->setLinePenColor(voltageSeries->pen().color());
-    axisVoltage->setTitleText("V");
-    voltageSeries->attachAxis(axisX);
-    voltageSeries->attachAxis(axisVoltage);
-
-    //chart->axisY()->setRange(-100, 500);
-    //chart->setAxisX(axisX, voltageSeries);
     axisX->setRange(0, 2000);
 
     ui->graphicsView->setChart(chart);
@@ -65,66 +84,53 @@ void MainWindow::stop()
     staticNext = 0;
 }
 
-void MainWindow::append(qreal x, qreal force, qreal voltage)
-{
-    if (isnan(minX) || x < minX)
-        minX = x;
-    if (isnan(maxX) || x > maxX)
-        maxX = x;
-    axisX->setRange(minX - 5, maxX + 5);
-    if (isnan(minForce) || force < minForce)
-        minForce = force;
-    if (isnan(maxForce) || force > maxForce)
-        maxForce = force;
-    axisForce->setRange(minForce - 5, maxForce + 5);
-    if (isnan(minVoltage) || voltage < minVoltage)
-        minVoltage = voltage;
-    if (isnan(maxVoltage) || voltage > maxVoltage)
-        maxVoltage = voltage;
-    axisVoltage->setRange(minVoltage - 5, maxVoltage + 5);
-    forceSeries->append(x, force);
-    voltageSeries->append(x, voltage);
-}
-
 void MainWindow::readData()
 {
     const QByteArray data = port.readAll();
     ui->statusBar->showMessage(data);
-    auto s = QString(data).split(" ");
+    for (const auto &line : QString(data).split("\r")) {
+        auto items = line.split(" ");
 
-    if (s[0] == "pbl") {
-        auto out = s[2].split(":");
-        auto stamp = QDateTime::currentMSecsSinceEpoch();
-        if (staticValue && !staticNext && staticValue == uint(out[1].toInt())) {
-            staticNext = stamp + staticDelay;
-            stopTimer.stop();
-        }
-        if (staticNext && staticNext < stamp) {
-            staticNext = 0;
-            staticValue += staticStep;
-            if (staticValue > staticMax) {
-                stop();
+        if (items[0] == "pbl") {
+            qreal ts = 0;
+            for (int i = 1; i < items.size(); ++i) {
+                const auto item = items[i].split(":");
+                const auto &key = item[0];
+                if (key == "ts") {
+                    ts = item[1].toInt() / 1000.0;
+                    if (isnan(minX) || ts < minX)
+                        minX = ts;
+                    if (isnan(maxX) || ts > maxX)
+                        maxX = ts;
+                    axisX->setRange(minX - 5, maxX + 5);
+                    continue;
+                }
+                if (key == "out") {
+                    auto stamp = QDateTime::currentMSecsSinceEpoch();
+                    if (staticValue && !staticNext && staticValue == uint(item[1].toInt())) {
+                        staticNext = stamp + staticDelay;
+                        stopTimer.stop();
+                    }
+                    if (staticNext && staticNext < stamp) {
+                        staticNext = 0;
+                        staticValue += staticStep;
+                        if (staticValue > staticMax) {
+                            stop();
 
-            } else {
-                setOut(staticValue);
-                stopTimer.setInterval(1000);
+                        } else {
+                            setOut(staticValue);
+                            stopTimer.setInterval(1000);
+                        }
+                    }
+                }
+                auto it = series.find(key.toStdString());
+                if (it != series.end()) {
+                    it->second.append(ts, item[1].toDouble());
+                }
             }
         }
-
-        auto force = s[3].split(":");
-        auto ts = s[1].split(":");
-        int t = ts[1].toInt();
-        auto voltage = s[4].split(":")[1].toDouble();
-        //static int mint = 0;
-        //if (mint == 0) mint = t;
-        double xx = t / 1000.0;
-        double yy = force[1].toDouble();
-        append(xx, yy, voltage);
     }
-    forceSeries->show();
-    voltageSeries->show();
-    //ui->graphicsView->repaint();
-    //m_console->putData(data);
+    //ui->
 }
 
 void MainWindow::on_pushButton_clicked()
@@ -163,15 +169,7 @@ void MainWindow::on_pushButton_2_clicked()
 
 void MainWindow::on_pushButton_5_clicked()
 {
-    forceSeries->clear();
-    voltageSeries->clear();
-    minX = NAN;
-    maxX = NAN;
-    minForce = NAN;
-    maxForce = NAN;
-    minVoltage = NAN;
-    maxVoltage = NAN;
-    ui->graphicsView->repaint();
+    clear();
 }
 
 void MainWindow::on_pushButton_6_clicked()
@@ -194,4 +192,12 @@ void MainWindow::on_pushButton_6_clicked()
 void MainWindow::on_buttonStop_clicked()
 {
     stop();
+}
+
+void MainWindow::clear()
+{
+    minX = NAN;
+    maxX = NAN;
+    for (auto &i : series) i.second.clear();
+    ui->graphicsView->repaint();
 }

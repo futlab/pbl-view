@@ -1,6 +1,8 @@
 #ifndef MAINWINDOW_H
 #define MAINWINDOW_H
 
+#include <map>
+#include <string>
 #include <QMainWindow>
 #include <QtCharts/QtCharts>
 QT_CHARTS_USE_NAMESPACE
@@ -9,6 +11,19 @@ QT_CHARTS_USE_NAMESPACE
 namespace Ui {
 class MainWindow;
 }
+
+class Series
+{
+private:
+    QLineSeries series;
+    QValueAxis axis;
+    qreal minY, maxY;
+    int maxCount;
+public:
+    void append(qreal x, qreal y);
+    Series(QChart *chart, QAbstractAxis *axisX, const QString &name, const QString &units, int maxCount = 500);
+    void clear();
+};
 
 class MainWindow : public QMainWindow
 {
@@ -34,13 +49,13 @@ private:
     QTimer stopTimer;
     uint staticValue, staticMin, staticMax, staticStep;
     qint64 staticDelay, staticNext;
-    qreal minX, maxX, minForce, maxForce, minVoltage, maxVoltage;
-    QLineSeries *forceSeries, *voltageSeries;
+    qreal minX, maxX;
     QSerialPort port;
     QChart *chart;
-    QAbstractAxis *axisX, *axisForce, *axisVoltage;
+    std::map<std::string, Series> series;
+    QAbstractAxis *axisX;
     Ui::MainWindow *ui;
-    void append(qreal x, qreal force, qreal voltage);
+    void clear();
     void setOut(uint out);
 };
 
