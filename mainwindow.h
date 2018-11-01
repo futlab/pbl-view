@@ -14,7 +14,7 @@ class MainWindow;
 
 class Series
 {
-private:
+protected:
     QLineSeries series;
     QValueAxis axis;
     qreal minY, maxY;
@@ -24,6 +24,18 @@ public:
     Series(QChart *chart, QAbstractAxis *axisX, const QString &name, const QString &units, int maxCount = 500);
     void clear();
 };
+
+class StaticSeries : public Series
+{
+private:
+    uint lastX, count;
+    qreal sum;
+public:
+    void sample(uint x, qreal y);
+    StaticSeries(QChart *chart, QAbstractAxis *axisX, const QString &name, const QString &units);
+    void clear();
+};
+
 
 class MainWindow : public QMainWindow
 {
@@ -51,13 +63,17 @@ private:
     qint64 staticDelay, staticNext, staticSample;
     qreal minX, maxX;
     QSerialPort port;
-    QChart *chart;
+    QChart *chart, *staticChart;
     std::map<std::string, Series> series;
-    std::map<std::string, Series> staticSeries;
-    QAbstractAxis *axisX;
+    std::map<std::string, StaticSeries> staticSeries;
+    QAbstractAxis *axisX, *axisOut;
     Ui::MainWindow *ui;
     void clear();
     void setOut(uint out);
+    qreal onStamp(const QString &stamp);
+    uint onOut(const QString &value, qint64 localTime);
+    void createChart();
+    void createStaticChart();
 };
 
 #endif // MAINWINDOW_H

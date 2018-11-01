@@ -1,7 +1,10 @@
 #include "mainwindow.h"
 #include "ui_mainwindow.h"
 #include <QSerialPortInfo>
+#include <cmath>
 
+using std::isnan;
+using std::nan;
 
 Series::Series(QChart *chart, QAbstractAxis *axisX, const QString &name, const QString &units, int maxCount) :
     maxCount(maxCount)
@@ -18,8 +21,8 @@ Series::Series(QChart *chart, QAbstractAxis *axisX, const QString &name, const Q
 void Series::clear()
 {
     series.clear();
-    minY = NAN;
-    maxY = NAN;
+    minY = nan("");
+    maxY = nan("");
 }
 
 void Series::append(qreal x, qreal y)
@@ -35,16 +38,44 @@ void Series::append(qreal x, qreal y)
     series.show();
 }
 
-MainWindow::MainWindow(QWidget *parent) :
-    QMainWindow(parent),
-    minX(NAN), maxX(NAN),
-    ui(new Ui::MainWindow)
+StaticSeries::StaticSeries(QChart *chart, QAbstractAxis *axisX, const QString &name, const QString &units) :
+    Series(chart, axisX, name, units), lastX(0), count(0), sum(0)
+{}
+
+void StaticSeries::clear()
 {
-    ui->setupUi(this);
+    Series::clear();
+    sum = 0;
+    count = 0;
+    lastX = 0;
+}
 
-    stopTimer.setSingleShot(true);
-    connect(&stopTimer, SIGNAL(timeout()), this, SLOT(stop()));
 
+void StaticSeries::sample(uint x, qreal y)
+{
+    if (x != lastX) {
+        lastX = x;
+        count = 1;
+        sum = y;
+        series.append(x, y);
+    } else {
+        series.removePoints(series.count() - 1, 1);
+        sum += y;
+        count++;
+        y = sum / count;
+        series.append(x, y);
+    }
+    if (isnan(minY) || y < minY)
+        minY = y;
+    if (isnan(maxY) || y > maxY)
+        maxY = y;
+    axis.setRange(minY - 0.1, maxY + 0.1);
+    series.show();
+}
+
+
+void MainWindow::createChart()
+{
     chart = new QChart();
     chart->setTitle("Time view");
     chart->createDefaultAxes();
@@ -61,6 +92,41 @@ MainWindow::MainWindow(QWidget *parent) :
 
     ui->graphicsView->setChart(chart);
     ui->graphicsView->setRenderHint(QPainter::Antialiasing);
+}
+
+void MainWindow::createStaticChart()
+{
+    staticChart = new QChart();
+    staticChart->setTitle("Static view");
+    staticChart->createDefaultAxes();
+    axisOut = new QValueAxis();
+    staticChart->addAxis(axisOut, Qt::AlignBottom);
+
+    staticSeries.emplace(std::piecewise_construct, std::forward_as_tuple("f"), std::forward_as_tuple(staticChart, axisOut, "Force", "g"));
+    staticSeries.emplace(std::piecewise_construct, std::forward_as_tuple("v"), std::forward_as_tuple(staticChart, axisOut, "Voltage", "V"));
+    staticSeries.emplace(std::piecewise_construct, std::forward_as_tuple("i"), std::forward_as_tuple(staticChart, axisOut, "Current", "A"));
+    //staticSeries.emplace(std::piecewise_construct, std::forward_as_tuple("out"), std::forward_as_tuple(chart, axisX, "Command", "μs"));
+    staticSeries.emplace(std::piecewise_construct, std::forward_as_tuple("r"), std::forward_as_tuple(staticChart, axisOut, "Rate", "Hz"));
+
+    axisOut->setRange(1200, 2000);
+    axisOut->setTitleText("μs");
+
+    ui->staticView->setChart(staticChart);
+    ui->staticView->setRenderHint(QPainter::Antialiasing);
+}
+
+MainWindow::MainWindow(QWidget *parent) :
+    QMainWindow(parent),
+    minX(nan("")), maxX(nan("")),
+    ui(new Ui::MainWindow)
+{
+    ui->setupUi(this);
+
+    stopTimer.setSingleShot(true);
+    connect(&stopTimer, SIGNAL(timeout()), this, SLOT(stop()));
+
+    createChart();
+    createStaticChart();
 
     connect(&port, &QSerialPort::readyRead, this, &MainWindow::readData);
 }
@@ -84,6 +150,39 @@ void MainWindow::stop()
     staticNext = 0;
 }
 
+inline qreal MainWindow::onStamp(const QString &stamp)
+{
+    qreal ts = stamp.toInt() / 1000.0;
+    if (isnan(minX) || ts < minX)
+        minX = ts;
+    if (isnan(maxX) || ts > maxX)
+        maxX = ts;
+    axisX->setRange(minX - 5, maxX + 5);
+    return ts;
+}
+
+inline uint MainWindow::onOut(const QString &value, qint64 localTime)
+{
+    const uint out = uint(value.toInt());
+    if (staticValue && !staticNext && staticValue == out) { // Received value equals to specified => waiting of transients
+        staticNext = localTime + staticDelay;
+        staticSample = localTime + qint64(staticDelay * 0.7);
+        stopTimer.stop();
+    }
+    if (staticNext && staticNext < localTime) { // Static sampling completed => next output value
+        staticNext = 0;
+        staticSample = 0;
+        staticValue += staticStep;
+        if (staticValue > staticMax)
+            stop();
+        else {
+            setOut(staticValue);
+            stopTimer.setInterval(1000);
+        }
+    }
+    return out;
+}
+
 void MainWindow::readData()
 {
     const QByteArray data = port.readAll();
@@ -92,54 +191,34 @@ void MainWindow::readData()
         auto items = line.split(" ");
 
         if (items[0] == "pbl") {
-            qreal ts = 0;
-            qint64 stamp = 0;
+            qreal standTime = 0;
+            qint64 localTime = QDateTime::currentMSecsSinceEpoch();
+            uint out = 0;
             for (int i = 1; i < items.size(); ++i) {
                 const auto item = items[i].split(":");
                 const auto &key = item[0];
                 if (key == "ts") {
-                    ts = item[1].toInt() / 1000.0;
-                    if (isnan(minX) || ts < minX)
-                        minX = ts;
-                    if (isnan(maxX) || ts > maxX)
-                        maxX = ts;
-                    axisX->setRange(minX - 5, maxX + 5);
+                    standTime = onStamp(item[1]);
                     continue;
                 }
-                if (key == "out") {
-                    stamp = QDateTime::currentMSecsSinceEpoch();
-                    if (staticValue && !staticNext && staticValue == uint(item[1].toInt())) {
-                        staticNext = stamp + staticDelay;
-                        staticSample = stamp + qint64(staticDelay * 0.7);
-                        stopTimer.stop();
-                    }
-                    if (staticNext && staticNext < stamp) {
-                        staticNext = 0;
-                        staticSample = 0;
-                        staticValue += staticStep;
-                        if (staticValue > staticMax) {
-                            stop();
+                if (key == "out")
+                    out = onOut(item[1], localTime);
 
-                        } else {
-                            setOut(staticValue);
-                            stopTimer.setInterval(1000);
-                        }
-                    }
-                }
                 auto stdKey = key.toStdString();
                 auto it = series.find(stdKey);
-                if (it != series.end())
-                    it->second.append(ts, item[1].toDouble());
-                if (staticSample && staticSample < stamp) {
-                    auto it = staticSeries.find(stdKey);
-                    if (it != staticSeries.end())
-                        //it->second.append();
-
+                if (it != series.end()) {
+                    if (item.length() < 2) continue;
+                    double value = item[1].toDouble();
+                    it->second.append(standTime, value);
+                    if (staticSample && staticSample < localTime) {
+                        auto s = staticSeries.find(stdKey);
+                        if (s != staticSeries.end())
+                            s->second.sample(out, value);
+                    }
                 }
             }
         }
     }
-    //ui->
 }
 
 void MainWindow::on_pushButton_clicked()
@@ -206,8 +285,10 @@ void MainWindow::on_buttonStop_clicked()
 
 void MainWindow::clear()
 {
-    minX = NAN;
-    maxX = NAN;
+    minX = nan("");
+    maxX = nan("");
     for (auto &i : series) i.second.clear();
     ui->graphicsView->repaint();
+    for (auto &i : staticSeries) i.second.clear();
+    ui->staticView->repaint();
 }
