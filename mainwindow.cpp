@@ -28,12 +28,11 @@ void Series::append(qreal x, qreal y)
         minY = y;
     if (isnan(maxY) || y > maxY)
         maxY = y;
-    axis.setRange(minY - 1, maxY + 1);
+    axis.setRange(minY - 0.1, maxY + 0.1);
     if (series.count() > maxCount)
         series.removePoints(0, 1);
     series.append(x, y);
     series.show();
-
 }
 
 MainWindow::MainWindow(QWidget *parent) :
@@ -56,6 +55,7 @@ MainWindow::MainWindow(QWidget *parent) :
     series.emplace(std::piecewise_construct, std::forward_as_tuple("v"), std::forward_as_tuple(chart, axisX, "Voltage", "V"));
     series.emplace(std::piecewise_construct, std::forward_as_tuple("i"), std::forward_as_tuple(chart, axisX, "Current", "A"));
     series.emplace(std::piecewise_construct, std::forward_as_tuple("out"), std::forward_as_tuple(chart, axisX, "Command", "μs"));
+    series.emplace(std::piecewise_construct, std::forward_as_tuple("r"), std::forward_as_tuple(chart, axisX, "Rate", "Hz"));
 
     axisX->setRange(0, 2000);
 
@@ -93,6 +93,7 @@ void MainWindow::readData()
 
         if (items[0] == "pbl") {
             qreal ts = 0;
+            qint64 stamp = 0;
             for (int i = 1; i < items.size(); ++i) {
                 const auto item = items[i].split(":");
                 const auto &key = item[0];
@@ -106,13 +107,15 @@ void MainWindow::readData()
                     continue;
                 }
                 if (key == "out") {
-                    auto stamp = QDateTime::currentMSecsSinceEpoch();
+                    stamp = QDateTime::currentMSecsSinceEpoch();
                     if (staticValue && !staticNext && staticValue == uint(item[1].toInt())) {
                         staticNext = stamp + staticDelay;
+                        staticSample = stamp + qint64(staticDelay * 0.7);
                         stopTimer.stop();
                     }
                     if (staticNext && staticNext < stamp) {
                         staticNext = 0;
+                        staticSample = 0;
                         staticValue += staticStep;
                         if (staticValue > staticMax) {
                             stop();
@@ -123,9 +126,15 @@ void MainWindow::readData()
                         }
                     }
                 }
-                auto it = series.find(key.toStdString());
-                if (it != series.end()) {
+                auto stdKey = key.toStdString();
+                auto it = series.find(stdKey);
+                if (it != series.end())
                     it->second.append(ts, item[1].toDouble());
+                if (staticSample && staticSample < stamp) {
+                    auto it = staticSeries.find(stdKey);
+                    if (it != staticSeries.end())
+                        //it->second.append();
+
                 }
             }
         }
@@ -187,6 +196,7 @@ void MainWindow::on_pushButton_6_clicked()
     setOut(staticValue);
     stopTimer.setInterval(1000);
     staticNext = 0;
+    staticSample = 0;
 }
 
 void MainWindow::on_buttonStop_clicked()

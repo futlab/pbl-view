@@ -48,11 +48,12 @@ private slots:
 private:
     QTimer stopTimer;
     uint staticValue, staticMin, staticMax, staticStep;
-    qint64 staticDelay, staticNext;
+    qint64 staticDelay, staticNext, staticSample;
     qreal minX, maxX;
     QSerialPort port;
     QChart *chart;
     std::map<std::string, Series> series;
+    std::map<std::string, Series> staticSeries;
     QAbstractAxis *axisX;
     Ui::MainWindow *ui;
     void clear();
