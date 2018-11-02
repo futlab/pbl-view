@@ -34,6 +34,7 @@ public:
     void sample(uint x, qreal y);
     StaticSeries(QChart *chart, QAbstractAxis *axisX, const QString &name, const QString &units);
     void clear();
+    QString lastValueToString() const;
 };
 
 
@@ -54,8 +55,9 @@ private slots:
     void on_pushButton_6_clicked();
     void on_buttonStop_clicked();    
     void on_screenshotButton_clicked();
-
+    void on_staticDumpEdit_textChanged(const QString &);
 private:
+    QFile staticDumpFile;
     QTimer stopTimer;
     uint staticValue, staticMin, staticMax, staticStep;
     qint64 staticDelay, staticNext, staticSample;
@@ -72,6 +74,7 @@ private:
     uint onOut(const QString &value, qint64 localTime);
     void createChart();
     void createStaticChart();
+    void dumpStatic(uint out);
 };
 
 #endif // MAINWINDOW_H

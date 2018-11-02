@@ -73,6 +73,10 @@ void StaticSeries::sample(uint x, qreal y)
     series.show();
 }
 
+QString StaticSeries::lastValueToString() const
+{
+    return count ? QString::number(sum / count, 'f', 2) : "?";
+}
 
 void MainWindow::createChart()
 {
@@ -144,6 +148,7 @@ void MainWindow::setOut(uint out)
 
 void MainWindow::stop()
 {
+    if (staticDumpFile.isOpen()) staticDumpFile.close();
     staticValue = 0;
     port.write(QString("o%1\r").arg(800).toLatin1());
     stopTimer.stop();
@@ -161,6 +166,30 @@ inline qreal MainWindow::onStamp(const QString &stamp)
     return ts;
 }
 
+void MainWindow::dumpStatic(uint out)
+{
+    if (!staticDumpFile.isOpen()) {
+        QString fileName = ui->staticDumpEdit->text();
+        if (fileName == "") return;
+        QFileInfo info(fileName);
+        if (info.exists() && !info.isFile())
+            return;
+        bool writeHeader = (!info.exists() || info.size() == 0);
+        staticDumpFile.setFileName(fileName);
+        staticDumpFile.open(QIODevice::WriteOnly | QIODevice::Append);
+        if (writeHeader) {
+            QStringList keys("out");
+            for(const auto &p : staticSeries)
+                keys.append(p.first.c_str());
+            staticDumpFile.write((keys.join(",") + "\r\n").toLatin1());
+        }
+    }
+    QStringList values(QString::number(out));
+    for(const auto &p : staticSeries)
+        values.append(p.second.lastValueToString());
+    staticDumpFile.write((values.join(",") + "\r\n").toLatin1());
+}
+
 inline uint MainWindow::onOut(const QString &value, qint64 localTime)
 {
     const uint out = uint(value.toInt());
@@ -170,6 +199,7 @@ inline uint MainWindow::onOut(const QString &value, qint64 localTime)
         stopTimer.stop();
     }
     if (staticNext && staticNext < localTime) { // Static sampling completed => next output value
+        dumpStatic(staticValue);
         staticNext = 0;
         staticSample = 0;
         staticValue += staticStep;
@@ -301,4 +331,10 @@ void MainWindow::on_screenshotButton_clicked()
     QPixmap p(chart->size());
     chart->render(&p);
     p.save(fileName);
+}
+
+void MainWindow::on_staticDumpEdit_textChanged(const QString &)
+{
+    if (staticDumpFile.isOpen())
+        staticDumpFile.close();
 }
