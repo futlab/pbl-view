@@ -50,12 +50,10 @@ private slots:
     void on_pushButton_clicked();
     void readData();
     void on_pushButton_2_clicked();
-
     void on_pushButton_5_clicked();
-
     void on_pushButton_6_clicked();
-
-    void on_buttonStop_clicked();
+    void on_buttonStop_clicked();    
+    void on_screenshotButton_clicked();
 
 private:
     QTimer stopTimer;

@@ -292,3 +292,13 @@ void MainWindow::clear()
     for (auto &i : staticSeries) i.second.clear();
     ui->staticView->repaint();
 }
+
+void MainWindow::on_screenshotButton_clicked()
+{
+    auto fileName = QFileDialog::getSaveFileName(this, "Save screenshot as", QString(), "Images (*.png *.jpg)");
+    if (fileName == "") return;
+    auto chart = ui->chartsTabWidget->currentWidget();
+    QPixmap p(chart->size());
+    chart->render(&p);
+    p.save(fileName);
+}
