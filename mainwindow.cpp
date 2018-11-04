@@ -87,6 +87,7 @@ void MainWindow::createChart()
     chart->addAxis(axisX, Qt::AlignBottom);
 
     series.emplace(std::piecewise_construct, std::forward_as_tuple("f"), std::forward_as_tuple(chart, axisX, "Force", "g"));
+    series.emplace(std::piecewise_construct, std::forward_as_tuple("t"), std::forward_as_tuple(chart, axisX, "Torque", "Nm"));
     series.emplace(std::piecewise_construct, std::forward_as_tuple("v"), std::forward_as_tuple(chart, axisX, "Voltage", "V"));
     series.emplace(std::piecewise_construct, std::forward_as_tuple("i"), std::forward_as_tuple(chart, axisX, "Current", "A"));
     series.emplace(std::piecewise_construct, std::forward_as_tuple("out"), std::forward_as_tuple(chart, axisX, "Command", "μs"));
@@ -107,6 +108,7 @@ void MainWindow::createStaticChart()
     staticChart->addAxis(axisOut, Qt::AlignBottom);
 
     staticSeries.emplace(std::piecewise_construct, std::forward_as_tuple("f"), std::forward_as_tuple(staticChart, axisOut, "Force", "g"));
+    staticSeries.emplace(std::piecewise_construct, std::forward_as_tuple("t"), std::forward_as_tuple(staticChart, axisOut, "Torque", "Nm"));
     staticSeries.emplace(std::piecewise_construct, std::forward_as_tuple("v"), std::forward_as_tuple(staticChart, axisOut, "Voltage", "V"));
     staticSeries.emplace(std::piecewise_construct, std::forward_as_tuple("i"), std::forward_as_tuple(staticChart, axisOut, "Current", "A"));
     //staticSeries.emplace(std::piecewise_construct, std::forward_as_tuple("out"), std::forward_as_tuple(chart, axisX, "Command", "μs"));
